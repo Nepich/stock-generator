@@ -1,8 +1,6 @@
 use clap::Parser;
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs, UdpSocket};
-use std::path::PathBuf;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -21,9 +19,9 @@ struct Args {
     #[arg(long)]
     udp_port: u16,
 
-    /// Path to file with tickers, one ticker per line
+    /// Comma-separated list of tickers, e.g. AAPL,MSFT,TSLA
     #[arg(long)]
-    tickers: PathBuf,
+    tickers: String,
 
     /// Server UDP port used for ping keepalive
     #[arg(long, default_value_t = 34562)]
@@ -39,9 +37,9 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let tickers = read_tickers(&args.tickers)?;
+    let tickers = parse_tickers(&args.tickers);
     if tickers.is_empty() {
-        return Err("Tickers file is empty".into());
+        return Err("Tickers list is empty".into());
     }
 
     let tcp_addr = resolve_address(&args.tcp_addr)?;
@@ -105,18 +103,12 @@ fn resolve_address(addr: &str) -> Result<SocketAddr, Box<dyn std::error::Error>>
         .ok_or_else(|| format!("cannot resolve TCP address: {addr}").into())
 }
 
-fn read_tickers(path: &PathBuf) -> io::Result<Vec<String>> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut tickers = Vec::new();
-    for line_result in reader.lines() {
-        let line = line_result?;
-        let ticker = line.trim();
-        if !ticker.is_empty() {
-            tickers.push(ticker.to_string());
-        }
-    }
-    Ok(tickers)
+fn parse_tickers(tickers: &str) -> Vec<String> {
+    tickers
+        .split(',')
+        .map(|ticket| ticket.trim().to_string())
+        .filter(|ticket| !ticket.is_empty())
+        .collect()
 }
 
 fn build_stream_command(local_udp_addr: &str, tickers: &[String]) -> String {
@@ -127,8 +119,6 @@ fn build_stream_command(local_udp_addr: &str, tickers: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
-    use std::io::Write;
 
     #[test]
     fn build_stream_command_generates_expected_string() {
@@ -137,15 +127,8 @@ mod tests {
     }
 
     #[test]
-    fn read_tickers_reads_non_empty_lines() {
-        let mut path = std::env::temp_dir();
-        path.push("streamer_tickers_test.txt");
-        let mut file = File::create(&path).unwrap();
-        writeln!(file, "AAPL\nGOOGL\nTSLA\n").unwrap();
-
-        let tickers = read_tickers(&path).unwrap();
-        assert_eq!(tickers, vec!["AAPL", "GOOGL", "TSLA"]);
-
-        std::fs::remove_file(path).unwrap();
+    fn parse_tickers_parses_comma_separated_values() {
+        let tickers = parse_tickers("AAPL, GOOG ,TSLA,, MSFT ");
+        assert_eq!(tickers, vec!["AAPL", "GOOG", "TSLA", "MSFT"]);
     }
 }
