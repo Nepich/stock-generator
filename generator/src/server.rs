@@ -111,15 +111,9 @@ impl Server {
         ping_handlers: Arc<Mutex<HashMap<String, Instant>>>,
     ) {
         thread::spawn(move || {
-            let ping_timeout = Duration::from_secs(5);
             loop {
-                let handler = ping_handlers.lock().unwrap();
-                match handler.get(&target_addr) {
-                    Some(last_ping) => {
-                        if last_ping.elapsed() > ping_timeout {
-                            break;
-                        }
-                    }
+                match ping_handlers.lock().unwrap().get(&target_addr).copied() {
+                    Some(_) => {}
                     None => break,
                 }
                 for ticket in &tickets {
@@ -147,14 +141,27 @@ impl Server {
     ) {
         thread::spawn(move || {
             let mut buf = [0u8; 1024];
+            let ping_timeout = Duration::from_secs(5);
             loop {
                 match socket.recv_from(&mut buf) {
                     Ok((size, src_addr)) => {
                         let payload = String::from_utf8_lossy(&buf[..size]);
+                        let addr = src_addr.to_string();
+
                         if payload.trim().eq_ignore_ascii_case("PING") {
-                            let addr = src_addr.to_string();
+                            ping_handlers
+                                .lock()
+                                .unwrap()
+                                .entry(addr.clone())
+                                .and_modify(|v| *v = Instant::now())
+                                .or_insert(Instant::now());
+                        } else {
                             let mut handlers = ping_handlers.lock().unwrap();
-                            handlers.entry(addr.clone()).or_insert(Instant::now());
+                            if let Some(last_ping) = handlers.get(&addr)
+                                && last_ping.elapsed() > ping_timeout
+                            {
+                                handlers.remove(&addr);
+                            }
                         }
                     }
                     Err(e) => eprintln!("UDP ping listener error: {:?}", e),
