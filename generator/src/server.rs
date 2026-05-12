@@ -119,7 +119,7 @@ impl Server {
                 for ticket in &tickets {
                     let quote = {
                         let gener = generator.lock().unwrap();
-                        gener.get_quote(ticket)
+                        gener.get_quote(ticket) 
                     };
                     if let Some(quote) = quote {
                         let encoded = quote.to_bytes();
